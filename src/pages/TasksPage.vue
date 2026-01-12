@@ -1,7 +1,18 @@
 <template>
   <q-page class="q-pa-md">
-    <div class="row items-center q-mb-lg">
+    <div class="row items-center q-mb-lg justify-between">
       <h1 class="text-h4 q-my-none">📋 Task Management</h1>
+      <div class="flex items-center gap-md">
+        <span class="text-body2">Welcome, <strong>{{ user.username }}</strong>!</span>
+        <q-btn
+          flat
+          color="negative"
+          label="Logout"
+          icon="logout"
+          @click="logout"
+          size="sm"
+        />
+      </div>
     </div>
 
     <!-- Add Task Form -->
@@ -56,17 +67,11 @@
     <!-- Error Message -->
     <q-banner v-if="error" class="bg-red-2 text-red-9 q-mb-md rounded-borders">
       ⚠️ {{ error }}
-      <template #avatar>
-        <q-icon name="close" @click="error = ''" class="cursor-pointer" />
-      </template>
     </q-banner>
 
     <!-- Success Message -->
     <q-banner v-if="success" class="bg-green-2 text-green-9 q-mb-md rounded-borders">
       ✅ {{ success }}
-      <template #avatar>
-        <q-icon name="close" @click="success = ''" class="cursor-pointer" />
-      </template>
     </q-banner>
 
     <!-- Loading Spinner -->
@@ -186,8 +191,18 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 
+const router = useRouter();
 const API_URL = 'http://localhost:5000/api';
+
+// Check if user is logged in
+const token = localStorage.getItem('authToken');
+const user = ref(JSON.parse(localStorage.getItem('user') || '{}'));
+
+if (!token) {
+  router.push('/login');
+}
 
 const tasks = ref([]);
 const loading = ref(false);
@@ -216,13 +231,17 @@ const statusOptions = ['pending', 'in_progress', 'completed'];
 const fetchTasks = async () => {
   try {
     loadingTasks.value = true;
-    const response = await fetch(`${API_URL}/tasks`);
+    const response = await fetch(`${API_URL}/tasks`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
     const data = await response.json();
 
     if (data.success) {
       tasks.value = data.data;
     } else {
-      error.value = data.message || 'Failed to load tasks';
+      showMessage(data.message || 'Failed to load tasks', 'error');
     }
   } catch (err) {
     error.value = 'Error connecting to server: ' + err.message;
@@ -234,32 +253,33 @@ const fetchTasks = async () => {
 // Add new task
 const addTask = async () => {
   if (!form.value.title.trim()) {
-    error.value = 'Please enter a task title';
+    showMessage('Please enter a task title', 'error');
     return;
   }
 
   try {
     loading.value = true;
-    error.value = '';
-    success.value = '';
 
     const response = await fetch(`${API_URL}/tasks`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify(form.value)
     });
 
     const data = await response.json();
 
     if (data.success) {
-      success.value = 'Task added successfully!';
+      showMessage('Task added successfully!', 'success');
       form.value = { title: '', description: '', status: 'pending' };
       await fetchTasks();
     } else {
-      error.value = data.message;
+      showMessage(data.message, 'error');
     }
   } catch (err) {
-    error.value = 'Error adding task: ' + err.message;
+    showMessage('Error adding task: ' + err.message, 'error');
   } finally {
     loading.value = false;
   }
@@ -275,12 +295,13 @@ const editTask = (task) => {
 const updateTask = async () => {
   try {
     loading.value = true;
-    error.value = '';
-    success.value = '';
 
     const response = await fetch(`${API_URL}/tasks/${editForm.value.id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify({
         title: editForm.value.title,
         description: editForm.value.description,
@@ -291,14 +312,14 @@ const updateTask = async () => {
     const data = await response.json();
 
     if (data.success) {
-      success.value = 'Task updated successfully!';
+      showMessage('Task updated successfully!', 'success');
       editDialog.value = false;
       await fetchTasks();
     } else {
-      error.value = data.message;
+      showMessage(data.message, 'error');
     }
   } catch (err) {
-    error.value = 'Error updating task: ' + err.message;
+    showMessage('Error updating task: ' + err.message, 'error');
   } finally {
     loading.value = false;
   }
@@ -310,23 +331,24 @@ const deleteTask = async (id) => {
 
   try {
     loading.value = true;
-    error.value = '';
-    success.value = '';
 
     const response = await fetch(`${API_URL}/tasks/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
     });
 
     const data = await response.json();
 
     if (data.success) {
-      success.value = 'Task deleted successfully!';
+      showMessage('Task deleted successfully!', 'success');
       await fetchTasks();
     } else {
-      error.value = data.message;
+      showMessage(data.message, 'error');
     }
   } catch (err) {
-    error.value = 'Error deleting task: ' + err.message;
+    showMessage('Error deleting task: ' + err.message, 'error');
   } finally {
     loading.value = false;
   }
@@ -346,6 +368,28 @@ const getStatusColor = (status) => {
     completed: 'green'
   };
   return colors[status] || 'grey';
+};
+
+// Logout
+const logout = () => {
+  localStorage.removeItem('authToken');
+  localStorage.removeItem('user');
+  router.push('/login');
+};
+
+// Auto-dismiss messages
+const showMessage = (message, type = 'success') => {
+  if (type === 'success') {
+    success.value = message;
+    setTimeout(() => {
+      success.value = '';
+    }, 3000);
+  } else {
+    error.value = message;
+    setTimeout(() => {
+      error.value = '';
+    }, 4000);
+  }
 };
 
 // Load tasks on mount
